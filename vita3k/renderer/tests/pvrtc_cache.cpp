@@ -9,13 +9,31 @@
 #include <cstdlib>
 #include <renderer/pvrt-dec.h>
 #include <renderer/pvrtc-cache.h>
+#include <string_view>
 #include <vector>
-int main(int argc, char **) {
+int main(int argc, char **argv) {
+    const bool configured = argc > 1 && std::string_view(argv[1]) == "configured";
+    const bool disabled = argc > 1 && !configured;
 #ifdef _WIN32
-    _putenv_s("VITA3K_DIAG_PVRTC_CACHE_MB", argc > 1 ? "0" : "1");
+    _putenv_s("VITA3K_DIAG_PVRTC_CACHE_MB", disabled ? "0" : "1");
 #else
-    setenv("VITA3K_DIAG_PVRTC_CACHE_MB", argc > 1 ? "0" : "1", 1);
+    setenv("VITA3K_DIAG_PVRTC_CACHE_MB", disabled ? "0" : "1", 1);
 #endif
+    if (configured) {
+#ifdef _WIN32
+        _putenv_s("VITA3K_DIAG_PVRTC_CACHE_MB", "");
+#else
+        unsetenv("VITA3K_DIAG_PVRTC_CACHE_MB");
+#endif
+        pvr::PVRTCConfigureDecodeCache(-1);
+        assert(pvr::PVRTCDecodeCacheStats().budget_bytes == 0);
+        pvr::PVRTCConfigureDecodeCache(513);
+        assert(pvr::PVRTCDecodeCacheStats().budget_bytes == size_t(512) * 1024 * 1024);
+        pvr::PVRTCConfigureDecodeCache(1);
+    } else {
+        // Explicit diagnostic override wins even when saved config requests off.
+        pvr::PVRTCConfigureDecodeCache(0);
+    }
     unsigned seed = 17, cases = 0;
     for (unsigned bits : { 0u, 1u })
         for (unsigned type : { 0u, 1u }) {
@@ -44,7 +62,7 @@ int main(int argc, char **) {
         }
     auto stats = pvr::PVRTCDecodeCacheStats();
     assert(stats.resident_bytes <= stats.budget_bytes);
-    if (argc > 1)
+    if (disabled)
         assert(stats.hits == 0 && stats.entries == 0 && stats.decodes == cases);
     else
         assert(stats.hits > 0 && stats.misses > 0 && stats.evictions > 0 && stats.bypasses > 0);
